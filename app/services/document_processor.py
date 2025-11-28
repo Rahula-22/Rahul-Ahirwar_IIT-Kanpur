@@ -5,7 +5,7 @@ from app.services.ocr_service import OCRService
 from app.services.llm_service import LLMService
 from app.services.preprocessor import DocumentPreprocessor
 from app.services.fraud_detector import FraudDetector
-from app.models.schemas import ExtractionData, PagewiseLineItems
+from app.models.schemas import ExtractionData, PagewiseLineItems, ExtractionResponse, TokenUsage
 from app.utils.logger import logger
 
 class DocumentProcessor:
@@ -17,7 +17,7 @@ class DocumentProcessor:
         self.fraud_detector = FraudDetector()
         logger.info("DocumentProcessor initialized successfully")
     
-    async def process_document(self, file_path: str) -> ExtractionData:
+    async def process_document(self, file_path: str) -> ExtractionResponse:
         """Process single or multi-page document"""
         start_time = time.time()
         logger.info(f"Processing document: {file_path}")
@@ -44,12 +44,16 @@ class DocumentProcessor:
                 logger.error("4. Image is heavily skewed or rotated")
                 
                 # Return empty result but don't fail
-                return ExtractionData(
-                    pagewise_line_items=[
-                        PagewiseLineItems(page_no="1", bill_items=[])
-                    ],
-                    total_item_count=0,
-                    reconciled_amount=0.0
+                return ExtractionResponse(
+                    is_success=True,
+                    token_usage=TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0),
+                    data=ExtractionData(
+                        pagewise_line_items=[
+                            PagewiseLineItems(page_no="1", page_type="Unknown", bill_items=[])
+                        ],
+                        total_item_count=0,
+                        reconciled_amount=0.0
+                    )
                 )
             
             # Step 3: Fraud detection
@@ -62,10 +66,10 @@ class DocumentProcessor:
             
             # Step 4: LLM-based structured extraction
             logger.info("Step 4: Extracting structured data via LLM...")
-            extraction = await self.llm_service.extract_invoice_data(ocr_data)
+            extraction_data, token_usage = await self.llm_service.extract_invoice_data(ocr_data)
             
             # Check if extraction is empty
-            if extraction.get('total_item_count', 0) == 0:
+            if extraction_data.get('total_item_count', 0) == 0:
                 logger.error("⚠️  LLM returned 0 valid items!")
                 logger.error("Debug information:")
                 logger.error(f"- OCR text length: {text_length} chars")
@@ -78,21 +82,32 @@ class DocumentProcessor:
                 logger.error("4. Try rescanning the document")
                 
                 # Return empty but valid response
-                return ExtractionData(
-                    pagewise_line_items=[
-                        PagewiseLineItems(page_no="1", bill_items=[])
-                    ],
-                    total_item_count=0,
-                    reconciled_amount=0.0
+                return ExtractionResponse(
+                    is_success=True,
+                    token_usage=token_usage,
+                    data=ExtractionData(
+                        pagewise_line_items=[
+                            PagewiseLineItems(page_no="1", page_type="Unknown", bill_items=[])
+                        ],
+                        total_item_count=0,
+                        reconciled_amount=0.0
+                    )
                 )
             else:
-                logger.info(f"✅ LLM extraction complete: {extraction.get('total_item_count')} items found")
+                logger.info(f"✅ LLM extraction complete: {extraction_data.get('total_item_count')} items found")
             
             processing_time = (time.time() - start_time) * 1000
             logger.info(f"Total processing time: {processing_time:.2f}ms")
             
-            return ExtractionData(**extraction)
+            return ExtractionResponse(
+                is_success=True,
+                token_usage=token_usage,
+                data=ExtractionData(**extraction_data)
+            )
         
         except Exception as e:
             logger.error(f"Error processing document: {str(e)}", exc_info=True)
-            raise
+            return ExtractionResponse(
+                is_success=False,
+                error=str(e)
+            )

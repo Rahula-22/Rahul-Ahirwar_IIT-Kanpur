@@ -17,7 +17,7 @@ This project extracts line items and amounts from medical bills/invoices using a
 - ✅ Handle multi-page documents (PDF, PNG, JPG)
 - ✅ No double-counting or missing items
 - ✅ Accurate amount reconciliation (qty × rate = amount)
-- ✅ Returns data in required JSON format
+- ✅ Returns data in required JSON format (including `token_usage` and `page_type`)
 
 ## For Evaluators
 
@@ -40,29 +40,44 @@ curl -X POST "http://localhost:8000/extract-bill-data" \
   -d '{"document": "YOUR_TEST_IMAGE_URL"}'
 ```
 
-### Expected Response Time
-- Simple invoices: ~2 seconds
-- Complex multi-page: ~5 seconds
+### API Signature
 
-### Supported Features
-✅ Multi-page documents  
-✅ Multilingual (English + Hindi)  
-✅ Fraud detection (whitening, fonts)  
-✅ Preprocessing for poor quality images  
-✅ Amount reconciliation validation
-
-### Known Limitations
-⚠️ Handwritten text: ~65% accuracy (Tesseract limitation)  
-⚠️ Very low resolution (<500px): May require higher quality input
-
-### Health Check
-```bash
-curl http://localhost:8000/health
+**Request:**
+```json
+POST /extract-bill-data
+{
+    "document": "https://example.com/invoice.png"
+}
 ```
 
-### Interactive Documentation
-```
-http://localhost:8000/docs
+**Response:**
+```json
+{
+    "is_success": true,
+    "token_usage": {
+        "total_tokens": 1500,
+        "input_tokens": 1200,
+        "output_tokens": 300
+    },
+    "data": {
+        "pagewise_line_items": [
+            {
+                "page_no": "1",
+                "page_type": "Bill Detail",
+                "bill_items": [
+                    {
+                        "item_name": "Consultation Fee",
+                        "item_amount": 500.00,
+                        "item_rate": 500.00,
+                        "item_quantity": 1.0
+                    }
+                ]
+            }
+        ],
+        "total_item_count": 1,
+        "reconciled_amount": 500.00
+    }
+}
 ```
 
 ### Differentiators
@@ -147,18 +162,6 @@ Automated detection of document manipulation:
 
 ---
 
-## 📊 Performance Metrics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Latency** | 2-5s per document | Includes OCR + LLM + validation |
-| **Accuracy** | 95%+ | On clear, standard invoices |
-| **Throughput** | 30 req/min | Limited by Groq free tier |
-| **Cost** | $0.00 | Completely free infrastructure |
-| **Uptime** | 99.9% | Depends on hosting |
-
----
-
 ## 🔧 Setup Instructions
 
 ### Prerequisites
@@ -228,64 +231,6 @@ Content-Type: multipart/form-data
 file: <invoice.png>
 ```
 
-### Response Format
-
-```json
-{
-  "is_success": true,
-  "data": {
-    "pagewise_line_items": [
-      {
-        "page_no": "1",
-        "bill_items": [
-          {
-            "item_name": "Consultation Fee",
-            "item_amount": 500.00,
-            "item_rate": 500.00,
-            "item_quantity": 1.0
-          }
-        ]
-      }
-    ],
-    "total_item_count": 1,
-    "reconciled_amount": 500.00
-  },
-  "error": null
-}
-```
-
----
-
-## 🧪 Testing
-
-### Test with Sample URL
-
-```bash
-python test_api.py
-```
-
-**Expected:** Extracts 4 items totaling ₹1699.84
-
-### Web UI Testing
-
-```bash
-# 1. Start server
-uvicorn app.main:app --reload
-
-# 2. Open browser
-http://localhost:8000
-
-# 3. Upload invoice image via drag-and-drop
-```
-
-### API Documentation
-
-```
-http://localhost:8000/docs
-```
-
-Interactive Swagger UI for testing all endpoints.
-
 ---
 
 ## 📁 Project Structure
@@ -316,120 +261,29 @@ finserv/
 
 ---
 
-## 🎓 Differentiators Explained
+## 🚀 Deployed API
 
-### 1. Preprocessing Pipeline
+**Live API Endpoint:** `https://your-app.onrender.com/extract-bill-data`
 
-**Problem:** Low-quality images have poor OCR accuracy  
-**Solution:** Multi-step enhancement pipeline
-
-```python
-# Our preprocessing steps:
-1. RGBA → RGB (handles transparency)
-2. Upscale to 2000px minimum (improves clarity)
-3. Grayscale conversion (reduces noise)
-4. Gentle contrast boost (1.5x enhancement)
-5. Sharpening filter (character clarity)
-```
-
-**Impact:** Successfully processes screenshots and phone photos
-
-### 2. Fraud Detection
-
-**Problem:** Detect tampered documents  
-**Solution:** Computer vision analysis
-
-```python
-# Detection methods:
-1. Whitening: Detect >5% pixels >240 brightness
-2. Font inconsistency: OCR confidence variance >30%
-3. Confidence scoring: Quantified 0-1 probability
-```
-
-**Output:** `fraud_detection: { detected: bool, details: [], confidence: float }`
-
-### 3. Multi-Modal OCR Strategy
-
-**Problem:** Single OCR mode fails on varied layouts  
-**Solution:** Try multiple approaches, pick best
-
-```python
-# PSM modes tried:
-PSM 3  → Full automatic (default)
-PSM 6  → Uniform text block
-PSM 4  → Single column
-PSM 11 → Sparse text
-Default → No special mode
-```
-
-**Impact:** 20% better extraction on complex invoices
-
----
-
-## 🔒 Error Handling
-
-- ✅ Graceful degradation (returns empty result, not error)
-- ✅ Detailed logging (debug OCR issues)
-- ✅ Input validation (Pydantic schemas)
-- ✅ Retry logic (LLM with 3 attempts)
-- ✅ Timeout handling (60s for downloads)
-
----
-
-## 🌐 Deployment
-
-### Docker
-
+**Test Command:**
 ```bash
-docker build -t finserv-api .
-docker run -p 8000:8000 -e GROQ_API_KEY=your_key finserv-api
+curl -X POST "https://your-app.onrender.com/extract-bill-data" \
+  -H "Content-Type: application/json" \
+  -d '{"document": "YOUR_INVOICE_URL"}'
 ```
 
-### Cloud Options
-- **Render.com** (free tier, auto-deploy from GitHub)
-- **Railway.app** (free tier, 500hrs/month)
-- **Fly.io** (free tier, 3 VMs)
-
----
-
-## 📝 Assignment Compliance
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| Extract line items | ✅ | LLM-based extraction with validation |
-| Multi-page support | ✅ | PDF and multi-image handling |
-| JSON format | ✅ | Pydantic schemas matching spec |
-| High accuracy | ✅ | 95%+ on clear documents |
-| Preprocessing | ✅ | 5-step pipeline (differentiator) |
-| Fraud detection | ✅ | Whitening + font checks (differentiator) |
-| API endpoint | ✅ | FastAPI with Swagger docs |
-| GitHub repo | ✅ | Clean, documented codebase |
-| Pitch deck | 📝 | See PITCH_DECK.md |
+**Interactive Documentation:** `https://your-app.onrender.com/docs`
 
 ---
 
 ## 🏆 Team
 
 - **Team Name:** [Your Team Name]
-- **Members:** [Your Names]
-- **Institution:** [Your College/Organization]
-- **Contact:** [Your Email]
-
----
-
-## 📞 API Deployment
-
-**Deployed URL:** `https://your-app.onrender.com` _(update after deployment)_
-
-**GitHub Repository:** `https://github.com/your-username/finserv` _(your private repo)_
-
----
-
-## 📞 Support
-
-For issues or questions:
-- GitHub Issues: [Your repo issues page]
-- Email: [Your contact email]
+- **Members:** [Member Names]
+- **Institution:** [College/Organization]
+- **Contact:** [Email]
+- **GitHub:** https://github.com/YOUR_USERNAME/finserv-invoice-extraction
+- **Deployed URL:** https://your-app.onrender.com
 
 ---
 

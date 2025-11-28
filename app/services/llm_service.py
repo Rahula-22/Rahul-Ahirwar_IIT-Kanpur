@@ -1,9 +1,10 @@
 import os
 import json
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from groq import Groq
 from dotenv import load_dotenv
 from app.utils.logger import logger
+from app.models.schemas import TokenUsage
 import asyncio
 
 load_dotenv()
@@ -18,10 +19,10 @@ class LLMService:
         self.client = Groq(api_key=api_key)
         logger.info("Groq LLM Service initialized (FREE & FAST!)")
     
-    async def extract_invoice_data(self, ocr_data: Dict, max_retries: int = 3) -> Dict:
+    async def extract_invoice_data(self, ocr_data: Dict, max_retries: int = 3) -> Tuple[Dict, TokenUsage]:
         """
         Use Groq (Llama 3.3) to extract structured invoice data with retry logic
-        FREE and much faster than OpenAI!
+        Returns tuple of (extracted_data, token_usage)
         """
         logger.info("Extracting structured data using Groq LLM...")
         
@@ -33,20 +34,29 @@ class LLMService:
                 
                 # Using Llama 3.3 70B - Latest and best model (still free!)
                 response = self.client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",  # Updated to latest model
+                    model="llama-3.3-70b-versatile",
                     messages=[
                         {"role": "system", "content": self._get_system_prompt()},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.1,
-                    max_tokens=2000,
+                    max_tokens=4000,
                     response_format={"type": "json_object"}
+                )
+                
+                # Capture token usage
+                usage = response.usage
+                token_usage = TokenUsage(
+                    total_tokens=usage.total_tokens,
+                    input_tokens=usage.prompt_tokens,
+                    output_tokens=usage.completion_tokens
                 )
                 
                 result = json.loads(response.choices[0].message.content)
                 logger.info("Groq LLM extraction successful")
                 
-                return self._validate_and_reconcile(result)
+                validated_data = self._validate_and_reconcile(result)
+                return validated_data, token_usage
             
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parsing failed: {e}")
@@ -63,62 +73,47 @@ class LLMService:
                     continue
                 else:
                     raise
+        
+        # Should not reach here due to raise
+        return {}, TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
     
     def _get_system_prompt(self) -> str:
         return """You are an expert at extracting structured data from medical bills, invoices, and receipts.
-Your task is to extract ALL line items with their quantities, rates, and amounts.
+Your task is to extract ALL line items with their quantities, rates, and amounts, and classify the page type.
 
 CRITICAL RULES:
-1. Extract EVERY single line item from the bill - do not skip any
-2. Do NOT double-count any items
+1. Extract EVERY single line item from the bill - do not skip any.
+2. Do NOT double-count any items.
 3. For each item, you MUST extract:
-   - item_name: The service/product name (e.g., "WARD SERVICES", "LAB CHARGES", "MEDICINE") - REQUIRED
+   - item_name: The service/product name (REQUIRED)
    - item_amount: The total amount for this line item (REQUIRED, MUST BE A NUMBER, NEVER null)
    - item_rate: The unit rate/price (can be null if not available)
    - item_quantity: The quantity (can be null if not available)
-4. If you cannot find a clear amount for an item, DO NOT include that item
-5. item_amount MUST ALWAYS be a valid number (float), never null or string
-6. Look for items in sections like:
-   - Ward/Room charges
-   - Lab/Diagnostic charges
-   - Pharmacy/Medicine charges
-   - Consultation fees
-   - Procedure charges
-   - Other services
-7. The bill may have sub-sections or categories - extract items from ALL sections
-8. Calculate reconciled_amount as the sum of all item_amount values
-9. Count total_item_count as the number of unique line items
-10. Group items by page number (use "1" for single page documents)
-
-IMPORTANT FORMATTING:
-- All amounts MUST be numbers: 1500.00, 2500, 450.50
-- NEVER use null for item_amount
-- If you see amounts like "1,500" convert to 1500.00
-- If you see amounts like "₹1500" or "Rs 1500", extract just the number: 1500.00
+4. Classify the page_type as one of: "Bill Detail", "Final Bill", or "Pharmacy".
+   - "Pharmacy": If the bill contains mostly medicines/drugs.
+   - "Final Bill": If it's a summary page or main invoice page.
+   - "Bill Detail": If it's a detailed breakdown page.
+5. item_amount MUST ALWAYS be a valid number (float), never null or string.
+6. Group items by page number (use "1" for single page documents).
 
 Return ONLY valid JSON with this exact structure:
 {
     "pagewise_line_items": [
         {
             "page_no": "1",
+            "page_type": "Bill Detail", 
             "bill_items": [
                 {
                     "item_name": "WARD SERVICES",
                     "item_amount": 5000.00,
                     "item_rate": 2500.00,
                     "item_quantity": 2.0
-                },
-                {
-                    "item_name": "LAB CHARGES",
-                    "item_amount": 1500.00,
-                    "item_rate": null,
-                    "item_quantity": null
                 }
             ]
         }
     ],
-    "total_item_count": 2,
-    "reconciled_amount": 6500.00
+    "total_item_count": 1,
+    "reconciled_amount": 5000.00
 }
 
 REMEMBER: item_amount must ALWAYS be a number, never null!"""
@@ -145,19 +140,12 @@ IMPORTANT INSTRUCTIONS:
 5. Don't skip items just because they lack quantity or rate - the amount is mandatory
 6. Look for number patterns that indicate amounts (with decimal points or currency symbols)
 7. CRITICAL: item_amount must ALWAYS be a valid number (like 1500.00, 500, 2500.50) NEVER null or text
-8. If you cannot determine the exact amount, try to extract what you can see
-
-EXAMPLES of what to extract:
-- "Consultation Fee 500" → item_name: "Consultation Fee", item_amount: 500.00
-- "Blood Test ₹1000" → item_name: "Blood Test", item_amount: 1000.00
-- "Ward Charges 2500.50" → item_name: "Ward Charges", item_amount: 2500.50
+8. Determine the page_type based on content (Pharmacy, Final Bill, or Bill Detail)
 
 OCR TEXT (may contain errors):
 {ocr_text[:6000]}
 
-Extract EVERY line item you can identify. Return valid JSON only.
-If the text is very garbled but you can identify ANY services with amounts, extract those.
-If you absolutely cannot find any items with clear amounts, return an empty bill_items array."""
+Extract EVERY line item you can identify. Return valid JSON only."""
     
     def _validate_and_reconcile(self, data: Dict) -> Dict:
         """Validate extraction and ensure amounts reconcile"""
@@ -168,6 +156,10 @@ If you absolutely cannot find any items with clear amounts, return an empty bill
         
         # Filter out invalid items BEFORE creating the response
         for page in data.get("pagewise_line_items", []):
+            # Ensure page_type exists
+            if "page_type" not in page:
+                page["page_type"] = "Bill Detail" # Default
+                
             valid_items = []
             
             for item in page.get("bill_items", []):

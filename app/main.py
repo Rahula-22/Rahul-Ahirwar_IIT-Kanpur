@@ -37,37 +37,6 @@ async def root():
     """Serve the web UI"""
     return FileResponse('static/index.html')
 
-@app.post("/extract", response_model=ExtractionResponse)
-async def extract_invoice_data(files: List[UploadFile] = File(...)):
-    """
-    Extract line items and amounts from invoice documents
-    Accepts multiple pages/documents
-    """
-    try:
-        # Save uploaded files temporarily
-        temp_files = []
-        for file in files:
-            temp_path = f"temp/{file.filename}"
-            os.makedirs("temp", exist_ok=True)
-            
-            with open(temp_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            temp_files.append(temp_path)
-        
-        # Process documents
-        result = await document_processor.process_documents(temp_files)
-        
-        # Cleanup
-        for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        
-        return result
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/extract-bill-data", response_model=ExtractionResponse)
 async def extract_bill_data(request: DocumentRequest):
     """
@@ -88,9 +57,10 @@ async def extract_bill_data(request: DocumentRequest):
         result = await document_processor.process_document(temp_path)
         
         processing_time = (time.time() - start_time) * 1000
-        logger.info(f"Extraction successful in {processing_time:.2f}ms - Items: {result.total_item_count}, Amount: {result.reconciled_amount}")
+        if result.is_success and result.data:
+            logger.info(f"Extraction successful in {processing_time:.2f}ms - Items: {result.data.total_item_count}")
         
-        return ExtractionResponse(is_success=True, data=result)
+        return result
     
     except httpx.HTTPError as e:
         logger.error(f"HTTP error downloading document: {str(e)}")
@@ -148,7 +118,7 @@ async def extract_bill_data_upload(file: UploadFile = File(...)):
         processing_time = (time.time() - start_time) * 1000
         logger.info(f"Extraction successful in {processing_time:.2f}ms")
 
-        return ExtractionResponse(is_success=True, data=result)
+        return result
 
     except Exception as e:
         logger.error(f"Extraction failed: {str(e)}", exc_info=True)

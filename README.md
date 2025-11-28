@@ -261,29 +261,33 @@ finserv/
 
 ---
 
-## 🚀 Deployed API
+## 🚀 Live Deployment
 
-**Live API Endpoint:** `https://your-app.onrender.com/extract-bill-data`
+**Deployed on:** Vercel
 
-**Test Command:**
+**API Endpoint:** `https://your-project.vercel.app/extract-bill-data`
+
+**Health Check:** `https://your-project.vercel.app/health`
+
+**Interactive Docs:** `https://your-project.vercel.app/docs`
+
+### Quick Test
 ```bash
-curl -X POST "https://your-app.onrender.com/extract-bill-data" \
+curl -X POST "https://your-project.vercel.app/extract-bill-data" \
   -H "Content-Type: application/json" \
-  -d '{"document": "YOUR_INVOICE_URL"}'
+  -d '{"document": "https://hackrx.blob.core.windows.net/assets/datathon-IIT/sample_2.png?..."}'
 ```
 
-**Interactive Documentation:** `https://your-app.onrender.com/docs`
+**Note:** Vercel deployment uses cloud-optimized OCR. For full Tesseract support, use local deployment or platforms that support system packages (Render.com, Railway with nixpacks).
 
 ---
 
 ## 🏆 Team
 
-- **Team Name:** [Your Team Name]
-- **Members:** [Member Names]
-- **Institution:** [College/Organization]
-- **Contact:** [Email]
+- **Team Name:** Rahul Ahirwar
+- **Institution:** IIT Kanpur
+- **Deployed URL:** https://your-project.vercel.app
 - **GitHub:** https://github.com/YOUR_USERNAME/finserv-invoice-extraction
-- **Deployed URL:** https://your-app.onrender.com
 
 ---
 
